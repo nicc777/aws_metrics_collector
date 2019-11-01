@@ -105,4 +105,4 @@ venv.bak/
  .vscode/
  aws_metrics_collector.log
 
- sample_*.json
+sample_*.json

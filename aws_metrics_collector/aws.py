@@ -47,4 +47,4 @@ def get_ec2_instances(aws_client, next_token: str=None, log_wrapper=LogWrapper()
     return result
 
 
-# EOF
+# EOF 
