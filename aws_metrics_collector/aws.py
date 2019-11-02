@@ -77,6 +77,7 @@ def get_regions_by_service(service='ec2', log_wrapper=LogWrapper())->list:
         return list(boto3.session.Session().get_available_regions(service))
     except:
         log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
+    return ['us-east-1']
 
 
 def get_ec2_instances(
