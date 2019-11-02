@@ -51,12 +51,6 @@ def get_utc_timestamp(with_decimal: bool=False):
     return int(timestamp)
 
 
-HOME = '{}{}.oculusd'.format(
-    str(pathlib.Path.home()),
-    os.sep
-)
-
-
 def id_caller()->list:
     result = list()
     try:
@@ -78,13 +72,12 @@ class LogWrapper:
         if message is not None:
             message = '{}'.format(message)
             if len(stack_data) == 3:
-                if self.debug_flag is True:
-                    message = '[{}:{}:{}] {}'.format(
-                        stack_data[0],
-                        stack_data[1],
-                        stack_data[2],
-                        message
-                    )
+                message = '[{}:{}:{}] {}'.format(
+                    stack_data[0],
+                    stack_data[1],
+                    stack_data[2],
+                    message
+                )
             return message
         return 'NO_INPUT_MESSAGE'
 
