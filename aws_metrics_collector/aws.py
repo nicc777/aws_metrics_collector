@@ -154,7 +154,7 @@ def get_rds_instances(
 
             if 'DBInstances' in response:
                 for db_instance_data in response['DBInstances']:
-                    rds_instance = AwsEC2Instance(log_wrapper=log_wrapper)
+                    rds_instance = AwsRDSInstance(log_wrapper=log_wrapper)
                     rds_instance.store_raw_instance_data(instance_data=db_instance_data)
                     if rds_instance.raw_instance_data is not None:
                         result.append(rds_instance)
