@@ -106,3 +106,4 @@ venv.bak/
  aws_metrics_collector.log
 
 sample_*.json
+aws_metrics_collector.log

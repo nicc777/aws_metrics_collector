@@ -1,3 +1,4 @@
+from aws_metrics_collector import LogWrapper
 
 
 def run():
