@@ -8,8 +8,18 @@ from aws_metrics_collector import get_utc_timestamp
 INSTANCE_CLASSES = (
     'ec2',
     'rds',
+    'cloudwatch',
 )
 MAX_RESULTS_DEFAULT = 20
+AWS_CLOUDWATCH_NAMESPACE_MAPPING = {    # Refere to https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/aws-services-cloudwatch-metrics.html or (NEW): https://docs.aws.amazon.com/en_pv/AmazonCloudWatch/latest/monitoring/aws-services-cloudwatch-metrics.html
+    'ec2': 'AWS/EC2',
+    'rds': 'AWS/RDS',
+}
+AWS_CLOUDWATCH_DIMENSION_NAME_MAPPING = {    
+    'ec2': 'InstanceId',
+    'rds': 'DBInstanceIdentifier',
+}
+
 
 
 class AwsInstance:
@@ -24,6 +34,7 @@ class AwsInstance:
         self.state = 'unknown'
         self.region = 'unknown'
         self.tags = dict()
+        self.metrics = list()
 
     def store_raw_instance_data(self, instance_data: dict):
         if instance_data is not None:
@@ -41,6 +52,7 @@ class AwsInstance:
             'InstanceState': self.state,
             'InstanceRegion': self.region,
             'Tags': self.tags,
+            'Metrics': self.metrics,
         }
 
     def _post_store_raw_instance_data_processing(self):
@@ -79,8 +91,8 @@ class AwsRDSInstance(AwsInstance):
     def _post_store_raw_instance_data_processing(self):
         self.log_wrapper.info(message='Processing a rds result')
         if self.raw_instance_data is not None:
-            if 'DbiResourceId' in self.raw_instance_data:
-                self.instance_id = self.raw_instance_data['DbiResourceId']
+            if 'DBInstanceIdentifier' in self.raw_instance_data:
+                self.instance_id = self.raw_instance_data['DBInstanceIdentifier']
             if 'DBInstanceClass' in self.raw_instance_data:
                 self.instance_type = self.raw_instance_data['DBInstanceClass']
             if 'DBInstanceStatus' in self.raw_instance_data:
@@ -99,6 +111,65 @@ class AWSInstanceCollection:
         for instance in self.instances:
             result['InstanceDefitions'].append(instance.to_dict())
         return result
+
+
+def get_service_client_default(service='ec2', region: str='us-east-1', target_profile: str=None, log_wrapper=LogWrapper()):
+    client = None
+    try:
+        if service not in INSTANCE_CLASSES:
+            raise Exception('Service "{}" not supported for this application yet'.format(service))
+        if region not in get_regions_by_service(service=service, log_wrapper=log_wrapper):
+            raise Exception('Service "{}" not available in selected region "{}"'.format(service, region))
+        if target_profile is not None:
+            session = boto3.Session(profile_name=target_profile)
+            client = session.client(service, region_name=region)
+        else:
+            client = boto3.client(service, region_name=region)
+    except:
+        log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
+    if client is not None:
+        log_wrapper.info(message='AWS Client connected to region "{}" for service "{}"'.format(region, service))
+    else:
+        log_wrapper.error(message='AWS Client could NOT connected to region "{}" for service "{}"'.format(region, service))
+    return client
+
+
+def get_instance_cloudwatch_metrics(aws_client, instance_id: str, service_name: str='ec2', next_token: str=None, log_wrapper=LogWrapper())->list:
+    instance_metrics = list()
+    if service_name not in INSTANCE_CLASSES:
+        log_wrapper.error(message='Invalid service name.')
+    else:
+        try:
+            response = dict()
+            if next_token is not None:
+                response = aws_client.list_metrics(
+                    Namespace=AWS_CLOUDWATCH_NAMESPACE_MAPPING[service_name],
+                    Dimensions=[
+                        {
+                            'Name': AWS_CLOUDWATCH_DIMENSION_NAME_MAPPING[service_name],
+                            'Value': instance_id
+                        }
+                    ],
+                    NextToken=next_token
+                )
+            else:
+                response = aws_client.list_metrics(
+                    Namespace=AWS_CLOUDWATCH_NAMESPACE_MAPPING[service_name],
+                    Dimensions=[
+                        {
+                            'Name': AWS_CLOUDWATCH_DIMENSION_NAME_MAPPING[service_name],
+                            'Value': instance_id
+                        }
+                    ],
+                )
+            if 'Metrics' in response:
+                for metric in response['Metrics']:
+                    if 'MetricName' in metric:
+                        instance_metrics.append(metric['MetricName'])
+        except:
+            log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
+    log_wrapper.info(message='Metrics for "{}/{}": {}'.format(service_name, instance_id, instance_metrics))
+    return instance_metrics
 
 
 def get_regions_by_service(service='ec2', log_wrapper=LogWrapper())->list:
@@ -139,6 +210,13 @@ def get_ec2_instances(
                             ec2instance.store_raw_instance_data(instance_data=instance_data)
                             if ec2instance.raw_instance_data is not None:
                                 ec2instance.region = aws_client.meta.region_name
+                                ec2instance.metrics = get_instance_cloudwatch_metrics(
+                                    aws_client=get_service_client_default(service='cloudwatch', region=aws_client.meta.region_name),
+                                    instance_id=ec2instance.instance_id,
+                                    service_name='ec2',
+                                    next_token=None,
+                                    log_wrapper=log_wrapper
+                                )
                                 result.append(ec2instance)
 
             ### end main processing ###
@@ -207,6 +285,13 @@ def get_rds_instances(
                         log_wrapper.warning(message='The data set did not contain an ARN - tags will NOT be retrieved.')
                     if rds_instance.raw_instance_data is not None:
                         rds_instance.region = aws_client.meta.region_name
+                        rds_instance.metrics = get_instance_cloudwatch_metrics(
+                            aws_client=get_service_client_default(service='cloudwatch', region=aws_client.meta.region_name),
+                            instance_id=rds_instance.instance_id,
+                            service_name='rds',
+                            next_token=None,
+                            log_wrapper=log_wrapper
+                        )
                         result.append(rds_instance)
 
             ### end main processing ###
@@ -225,27 +310,6 @@ def get_rds_instances(
     else:
         log_wrapper.warning(message='No RDS instances were fetched because the aws_client was not defined - failing gracefully...')
     return result
-
-
-def get_service_client_default(service='ec2', region: str='us-east-1', target_profile: str=None, log_wrapper=LogWrapper()):
-    client = None
-    try:
-        if service not in INSTANCE_CLASSES:
-            raise Exception('Service "{}" not supported for this application yet'.format(service))
-        if region not in get_regions_by_service(service=service, log_wrapper=log_wrapper):
-            raise Exception('Service "{}" not available in selected region "{}"'.format(service, region))
-        if target_profile is not None:
-            session = boto3.Session(profile_name=target_profile)
-            client = session.client(service, region_name=region)
-        else:
-            client = boto3.client(service, region_name=region)
-    except:
-        log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
-    if client is not None:
-        log_wrapper.info(message='AWS Client connected to region "{}" for service "{}"'.format(region, service))
-    else:
-        log_wrapper.error(message='AWS Client could NOT connected to region "{}" for service "{}"'.format(region, service))
-    return client
 
 
 def collect_aws_instance_data(
