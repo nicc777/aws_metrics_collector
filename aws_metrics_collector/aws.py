@@ -19,6 +19,10 @@ class AwsInstance:
         self.log_wrapper = log_wrapper
         self.last_update = None
         self.raw_instance_data = None
+        self.instance_id = 'unknown'
+        self.instance_type = 'unknown'
+        self.state = 'unknown'
+        self.region = 'unknown'
 
     def store_raw_instance_data(self, instance_data: dict):
         if instance_data is not None:
@@ -27,6 +31,16 @@ class AwsInstance:
                 self.last_update = get_utc_timestamp(with_decimal=False)
         self._post_store_raw_instance_data_processing()
 
+    def to_dict(self):
+        return {
+            'InstanceClass': self.instance_class,
+            'LastUpdate': self.last_update,
+            'InstanceId': self.instance_id,
+            'InstanceType': self.instance_type,
+            'InstanceState': self.state,
+            'InstanceRegion': self.region,
+        }
+
     def _post_store_raw_instance_data_processing(self):
         pass
 
@@ -34,9 +48,6 @@ class AwsInstance:
 class AwsEC2Instance(AwsInstance):
 
     def __init__(self, log_wrapper: LogWrapper=LogWrapper()):
-        self.instance_id = 'unknown'
-        self.instance_type = 'unknown'
-        self.state = 'stopped'
         super().__init__(instance_class='ec2', log_wrapper=log_wrapper)
 
     def _post_store_raw_instance_data_processing(self):
@@ -57,12 +68,17 @@ class AwsEC2Instance(AwsInstance):
 class AwsRDSInstance(AwsInstance):
 
     def __init__(self, log_wrapper: LogWrapper=LogWrapper()):
-        super().__init__(instance_class='ec2', log_wrapper=log_wrapper)
+        super().__init__(instance_class='rds', log_wrapper=log_wrapper)
 
     def _post_store_raw_instance_data_processing(self):
-        self.log_wrapper.info(message='Processing a ec2 result')
+        self.log_wrapper.info(message='Processing a rds result')
         if self.raw_instance_data is not None:
-            self.log_wrapper.info(message='Processed RDS Instance')
+            if 'DbiResourceId' in self.raw_instance_data:
+                self.instance_id = self.raw_instance_data['DbiResourceId']
+            if 'DBInstanceClass' in self.raw_instance_data:
+                self.instance_type = self.raw_instance_data['DBInstanceClass']
+            if 'DBInstanceStatus' in self.raw_instance_data:
+                self.state = self.raw_instance_data['DBInstanceStatus']
 
 
 class AWSInstanceCollection:
@@ -70,6 +86,13 @@ class AWSInstanceCollection:
     def __init__(self, log_wrapper: LogWrapper=LogWrapper()):
         self.instances = list()
         self.log_wrapper = log_wrapper
+
+    def to_dict(self)->dict:
+        result = dict()
+        result['InstanceDefitions'] = list()
+        for instance in self.instances:
+            result['InstanceDefitions'].append(instance.to_dict())
+        return result
 
 
 def get_regions_by_service(service='ec2', log_wrapper=LogWrapper())->list:
@@ -102,7 +125,6 @@ def get_ec2_instances(
                     MaxResults=max_results_per_iteration
                 )
             ### Main processing ###
-
             if 'Reservations' in response:
                 for reservation in response['Reservations']:
                     if 'Instances' in reservation:
@@ -110,6 +132,7 @@ def get_ec2_instances(
                             ec2instance = AwsEC2Instance(log_wrapper=log_wrapper)
                             ec2instance.store_raw_instance_data(instance_data=instance_data)
                             if ec2instance.raw_instance_data is not None:
+                                ec2instance.region = aws_client.meta.region_name
                                 result.append(ec2instance)
 
             ### end main processing ###
@@ -158,6 +181,7 @@ def get_rds_instances(
                     rds_instance = AwsRDSInstance(log_wrapper=log_wrapper)
                     rds_instance.store_raw_instance_data(instance_data=db_instance_data)
                     if rds_instance.raw_instance_data is not None:
+                        rds_instance.region = aws_client.meta.region_name
                         result.append(rds_instance)
 
             ### end main processing ###
@@ -211,22 +235,25 @@ def collect_aws_instance_data(
         for service in services:
             if all_regions is True:
                 regions = get_regions_by_service(service=service, log_wrapper=log_wrapper)
+            log_wrapper.info('Checking regions: {}'.format(regions))
             for region in regions:
+                log_wrapper.info('Now checking region "{}"'.format(region))
                 client = get_service_client_default(service=service, region=region, target_profile=target_profile, log_wrapper=log_wrapper)
-            instances = list()
-            if service == 'ec2':
-                instances = get_ec2_instances(
-                    aws_client=client,
-                    log_wrapper=log_wrapper
-                )
-            if service == 'rds':
-                instances = get_rds_instances(
-                    aws_client=client,
-                    log_wrapper=log_wrapper
-                )
-            if len(instances) > 0:
-                for instance in instances:
-                    instance_data_collection.instances.append(instance)
+                instances = list()
+                if service == 'ec2':
+                    instances = get_ec2_instances(
+                        aws_client=client,
+                        log_wrapper=log_wrapper
+                    )
+                if service == 'rds':
+                    instances = get_rds_instances(
+                        aws_client=client,
+                        log_wrapper=log_wrapper
+                    )
+                if len(instances) > 0:
+                    for instance in instances:
+                        instance_data_collection.instances.append(instance)
+                log_wrapper.info('Added {} instances'.format(len(instances)))
     except:
         log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
     return instance_data_collection
