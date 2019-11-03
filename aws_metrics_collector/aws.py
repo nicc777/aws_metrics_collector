@@ -23,6 +23,7 @@ class AwsInstance:
         self.instance_type = 'unknown'
         self.state = 'unknown'
         self.region = 'unknown'
+        self.tags = dict()
 
     def store_raw_instance_data(self, instance_data: dict):
         if instance_data is not None:
@@ -39,6 +40,7 @@ class AwsInstance:
             'InstanceType': self.instance_type,
             'InstanceState': self.state,
             'InstanceRegion': self.region,
+            'Tags': self.tags,
         }
 
     def _post_store_raw_instance_data_processing(self):
@@ -60,6 +62,10 @@ class AwsEC2Instance(AwsInstance):
             if 'State' in self.raw_instance_data:
                 if 'Name' in self.raw_instance_data['State']:
                     self.state = self.raw_instance_data['State']['Name']
+            if 'Tags' in self.raw_instance_data:
+                for tag in self.raw_instance_data['Tags']:
+                    if 'Key' in tag and 'Value' in tag:
+                        self.tags[tag['Key']] = tag['Value']
             self.log_wrapper.info(message='Processed instance ID "{}"'.format(self.instance_id))
         else:
             self.log_wrapper.error(message='raw_instance_data is None')
@@ -153,6 +159,21 @@ def get_ec2_instances(
     return result
 
 
+def get_rds_instance_tags(aws_client, db_instance_arn: str, log_wrapper=LogWrapper())->dict:
+    tags = dict()
+    try:
+        log_wrapper.info(message='Retrieving tags for RDS instance "{}"'.format(db_instance_arn))
+        response = aws_client.list_tags_for_resource(ResourceName=db_instance_arn)
+        if 'TagList' in response:
+            for tag in response['TagList']:
+                if 'Key' in tag and 'Value' in tag:
+                    tags[tag['Key']] = tag['Value']
+
+    except:
+        log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
+    return tags
+
+
 def get_rds_instances(
     aws_client, 
     next_token: str=None, 
@@ -180,6 +201,10 @@ def get_rds_instances(
                 for db_instance_data in response['DBInstances']:
                     rds_instance = AwsRDSInstance(log_wrapper=log_wrapper)
                     rds_instance.store_raw_instance_data(instance_data=db_instance_data)
+                    if 'DBInstanceArn' in db_instance_data:
+                        rds_instance.tags = get_rds_instance_tags(aws_client=aws_client, db_instance_arn=db_instance_data['DBInstanceArn'], log_wrapper=log_wrapper)
+                    else:
+                        log_wrapper.warning(message='The data set did not contain an ARN - tags will NOT be retrieved.')
                     if rds_instance.raw_instance_data is not None:
                         rds_instance.region = aws_client.meta.region_name
                         result.append(rds_instance)
