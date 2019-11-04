@@ -3,6 +3,7 @@ import traceback
 from datetime import datetime, timedelta
 from aws_metrics_collector import LogWrapper
 from aws_metrics_collector import get_utc_timestamp
+from aws_metrics_collector.utils import dict_to_json
 
 
 INSTANCE_CLASSES = (
@@ -234,7 +235,7 @@ def get_instance_metric_statistics(
             result[metric_name] = response['Datapoints']
     except:
         log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
-    log_wrapper.info(message='Metric Statistics for "{}/{}/{}/{}/{}": {}'.format(service_name, name_space, dimension_name, instance_id, metric_name, result[metric_name]))
+    log_wrapper.info(message='Metric Statistics for "{}/{}/{}/{}/{}": {} bytes of JSON data'.format(service_name, name_space, dimension_name, instance_id, metric_name, len(dict_to_json(result))))
     return result
 
 
@@ -363,6 +364,19 @@ def get_rds_instances(
                             next_token=None,
                             log_wrapper=log_wrapper
                         )
+                        if len(rds_instance.metrics) > 0:
+                            for metric in rds_instance.metrics:
+                                metric_statistics = get_instance_metric_statistics(
+                                    aws_client=get_service_client_default(service='cloudwatch', region=aws_client.meta.region_name),
+                                    instance_id=rds_instance.instance_id,
+                                    service_name='rds',
+                                    metric_name=metric,
+                                    start_timestamp=_get_start_timestamp(),
+                                    end_timestamp=_get_end_timestamp(),
+                                    period=300,
+                                    log_wrapper=log_wrapper
+                                )
+                                rds_instance.metric_statistics[metric] = metric_statistics[metric]
                         result.append(rds_instance)
 
             ### end main processing ###

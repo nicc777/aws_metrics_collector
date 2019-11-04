@@ -20,3 +20,20 @@ $ . venv/bin/activate
 (venv) $ python3 setup.py sdist
 (venv) $ pip3 install dist/*
 ```
+
+## Examples
+
+### Using REPL to retrieve all EC2 and RDS instance Metric Statistics from All Regions
+
+The following example will save the metric statistics to a JSON file:
+
+```python
+>>> from aws_metrics_collector.aws import collect_aws_instance_data
+>>> from aws_metrics_collector.utils import dict_to_json
+>>> data = collect_aws_instance_data()
+>>> with open('data.json', 'w') as f:
+...     f.write(dict_to_json(data.to_dict()))
+... 
+4826231
+```
+**Warning** The resulting data file might be rather big.
