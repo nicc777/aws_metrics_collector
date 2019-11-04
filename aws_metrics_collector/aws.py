@@ -1,6 +1,6 @@
 import boto3
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from aws_metrics_collector import LogWrapper
 from aws_metrics_collector import get_utc_timestamp
 
@@ -35,6 +35,7 @@ class AwsInstance:
         self.region = 'unknown'
         self.tags = dict()
         self.metrics = list()
+        self.metric_statistics = dict()
 
     def store_raw_instance_data(self, instance_data: dict):
         if instance_data is not None:
@@ -53,6 +54,7 @@ class AwsInstance:
             'InstanceRegion': self.region,
             'Tags': self.tags,
             'Metrics': self.metrics,
+            'MetricStatistics': self.metric_statistics,
         }
 
     def _post_store_raw_instance_data_processing(self):
@@ -180,6 +182,62 @@ def get_regions_by_service(service='ec2', log_wrapper=LogWrapper())->list:
     return ['us-east-1']
 
 
+def _get_start_timestamp()->datetime:
+    yesterday = datetime.now() - timedelta(1)
+    yesterday = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    return yesterday
+
+
+def _get_end_timestamp()->datetime:
+    yesterday = datetime.now() - timedelta(1)
+    yesterday = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
+    return yesterday
+
+
+def get_instance_metric_statistics(
+    aws_client, 
+    instance_id: str,
+    service_name: str='ec2',
+    metric_name: str='CPUUtilization',
+    start_timestamp: datetime=_get_start_timestamp(),
+    end_timestamp: datetime=_get_end_timestamp(),
+    period: int=300,
+    log_wrapper=LogWrapper()
+)->dict:
+    result = dict()
+    result[metric_name] = dict()
+    if service_name not in AWS_CLOUDWATCH_NAMESPACE_MAPPING:
+        log_wrapper.error(message='Invalid service name.')
+        return result
+    dimension_name = AWS_CLOUDWATCH_DIMENSION_NAME_MAPPING[service_name]
+    name_space = AWS_CLOUDWATCH_NAMESPACE_MAPPING[service_name]
+    try:
+        log_wrapper.info('Retrieving metrics data for "{}/{}/{}/{}/{}"'.format(service_name, name_space, dimension_name, instance_id, metric_name))
+        response = aws_client.get_metric_statistics(
+            Namespace=name_space,
+            MetricName=metric_name,
+            Dimensions=[
+                {
+                    'Name': dimension_name,
+                    'Value': instance_id
+                },
+            ],
+            StartTime=start_timestamp,
+            EndTime=end_timestamp,
+            Period=period,
+            Statistics=[
+                'Average',
+                'Maximum',
+            ]
+        )
+        if 'Datapoints' in response:
+            result[metric_name] = response['Datapoints']
+    except:
+        log_wrapper.error(message='EXCEPTION: {}'.format(traceback.format_exc()))
+    log_wrapper.info(message='Metric Statistics for "{}/{}/{}/{}/{}": {}'.format(service_name, name_space, dimension_name, instance_id, metric_name, result[metric_name]))
+    return result
+
+
 def get_ec2_instances(
     aws_client, 
     next_token: str=None, 
@@ -217,6 +275,19 @@ def get_ec2_instances(
                                     next_token=None,
                                     log_wrapper=log_wrapper
                                 )
+                                if len(ec2instance.metrics) > 0:
+                                    for metric in ec2instance.metrics:
+                                        metric_statistics = get_instance_metric_statistics(
+                                            aws_client=get_service_client_default(service='cloudwatch', region=aws_client.meta.region_name),
+                                            instance_id=ec2instance.instance_id,
+                                            service_name='ec2',
+                                            metric_name=metric,
+                                            start_timestamp=_get_start_timestamp(),
+                                            end_timestamp=_get_end_timestamp(),
+                                            period=300,
+                                            log_wrapper=log_wrapper
+                                        )
+                                        ec2instance.metric_statistics[metric] = metric_statistics[metric]
                                 result.append(ec2instance)
 
             ### end main processing ###
