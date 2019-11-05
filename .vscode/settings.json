@@ -1,8 +1,0 @@
-{
-    "python.pythonPath": "venv/bin/python3",
-    "cSpell.words": [
-        "amcollect",
-        "dateutil",
-        "tzutc"
-    ]
-}
