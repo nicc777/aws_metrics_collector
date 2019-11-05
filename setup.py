@@ -6,8 +6,8 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 setup(
     name='aws_metrics_collector',  # Required
-    version='0.0.0',  # Required
-    download_url = 'https://github.com/nicc777/aws_metrics_collector/releases/download/release-0.0.0/aws_metrics_collector-0.0.0.tar.gz',
+    version='0.0.1',  # Required
+    download_url = 'https://github.com/nicc777/aws_metrics_collector/releases/download/release-0.0.1/aws_metrics_collector-0.0.1.tar.gz',
     description='Collect AWS EC2 and RDS Instance Metrics for Local Analysis',  # Optional
     long_description=long_description,  # Optional
     long_description_content_type='text/markdown',  # Optional (see note above)
