@@ -37,3 +37,13 @@ The following example will save the metric statistics to a JSON file:
 4826231
 ```
 **Warning** The resulting data file might be rather big.
+
+### Manually Running in REPL with Defaults
+
+This example is similar to the above but using the primary `run()` function:
+
+```python
+>>> from aws_metrics_collector.aws_metrics_collector import run
+>>> run()
+```
+
